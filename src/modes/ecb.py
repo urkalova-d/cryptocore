@@ -1,33 +1,10 @@
-""" AES-128 ECB с PKCS#7"""
-from Crypto.Cipher import AES
-
-BLOCK_SIZE = 16
-
-
-def pkcs7_pad(data: bytes) -> bytes:
-    """дополнение data до кратного блок сайз с помощью PKCS#7"""
-    pad_len = BLOCK_SIZE - (len(data) % BLOCK_SIZE)
-    return data + bytes([pad_len]) * pad_len
-
-
-def pkcs7_unpad(data: bytes) -> bytes:
-    """проверка и снятие дополнения PKCS#7 с data"""
-    if not data or len(data) % BLOCK_SIZE != 0:
-        raise ValueError("Некорректная длина дополненных данных")
-
-    pad_len = data[-1]
-    if pad_len < 1 or pad_len > BLOCK_SIZE:
-        raise ValueError("Некорректное дополнение PKCS#7")
-
-    if data[-pad_len:] != bytes([pad_len]) * pad_len:
-        raise ValueError("Некорректное дополнение PKCS#7")
-
-    return data[:-pad_len]
+"""aes-128 ECB mode с PKCS#7 """
+from .common import BLOCK_SIZE, pkcs7_pad, pkcs7_unpad, new_block_cipher
 
 
 def encrypt_ecb(key: bytes, plaintext: bytes) -> bytes:
-    """зашифровка plaintext по AES-128-ECB с дополнением PKCS#7"""
-    cipher = AES.new(key, AES.MODE_ECB)
+    """зашифровать плейнтекст в режиме AES-128-ECB с PKCS#7"""
+    cipher = new_block_cipher(key)
     padded = pkcs7_pad(plaintext)
 
     ciphertext = bytearray()
@@ -39,11 +16,11 @@ def encrypt_ecb(key: bytes, plaintext: bytes) -> bytes:
 
 
 def decrypt_ecb(key: bytes, ciphertext: bytes) -> bytes:
-    """расшифровка ciphertext по AES-128-ECB и снять дополнение PKCS#7"""
+    """расшифровать шифртекст, зашифрованный AES-128-ECB, и снять padding"""
     if len(ciphertext) % BLOCK_SIZE != 0:
-        raise ValueError("Длина шифротекста не кратна размеру блока")
+        raise ValueError("Ciphertext length is not a multiple of the block size")
 
-    cipher = AES.new(key, AES.MODE_ECB)
+    cipher = new_block_cipher(key)
 
     plaintext = bytearray()
     for offset in range(0, len(ciphertext), BLOCK_SIZE):
