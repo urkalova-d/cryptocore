@@ -10,6 +10,7 @@ from src.modes.cbc import encrypt_cbc, decrypt_cbc
 from src.modes.cfb import encrypt_cfb, decrypt_cfb
 from src.modes.ofb import encrypt_ofb, decrypt_ofb
 from src.modes.ctr import encrypt_ctr, decrypt_ctr
+from src.hash_cli import run_dgst
 
 #таблица режимов
 MODES = {
@@ -22,6 +23,15 @@ MODES = {
 
 
 def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # подкоманда dgst (хэширование) обрабатывается отдельным парсером
+    # и не пересекается с шифрованием
+    if argv and argv[0] == "dgst":
+        run_dgst(argv[1:])
+        return
+
     args = parse_args(argv)
     mode = MODES[args.mode]
 
