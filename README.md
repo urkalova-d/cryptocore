@@ -4,6 +4,9 @@ CLI-инструмент для шифрования и расшифровани
 в режимах ECB, CBC, CFB, OFB и CTR, с собственным криптостойким
 генератором случайных чисел для ключей и IV.
 
+Также умеет считать хэши файлов (SHA-256 и SHA3-256, реализованы с нуля) —
+подкоманда `dgst`.
+
 ## Зависимости
 
 - Python 3.8+
@@ -114,6 +117,61 @@ Mersenne Twister, предсказуемый при известном сост�
 предыдущие значения. Именно поэтому модуль `random` нигде в проекте
 не используется — только `os.urandom()`.
 
+## Хэширование файлов: подкоманда `dgst`
+
+`dgst` вычисляет хэш (дайджест) файла. Это отдельная подкоманда: аргументы
+шифрования (`--key`, `--mode`, `--encrypt`, `--decrypt`, `--iv`) она не
+принимает — при их указании инструмент завершится с ошибкой.
+
+| Аргумент | Обязателен | Описание |
+|----------|:---:|---|
+| `--algorithm` | да | `sha256` или `sha3-256` |
+| `--input` | да | путь к файлу; `-` означает стандартный ввод |
+| `--output` | нет | записать результат в файл вместо stdout (формат тот же) |
+
+Формат вывода такой же, как у утилит `sha256sum`/`sha3sum`:
+`<хэш в нижнем регистре><два пробела><путь>`.
+
+```bash
+# Хэш файла
+cryptocore dgst --algorithm sha256 --input document.pdf
+# 5d5b09f6...  document.pdf
+
+# Другой алгоритм, результат в файл
+cryptocore dgst --algorithm sha3-256 --input backup.tar --output backup.sha3
+
+# Из стандартного ввода (векторы NIST)
+echo -n "abc" | cryptocore dgst --algorithm sha256 --input -
+# ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  -
+```
+
+Файл читается в бинарном режиме порциями по 64 КиБ, поэтому расход памяти
+не зависит от размера файла (пустые и очень большие файлы поддерживаются).
+
+### Реализованные алгоритмы
+
+Оба алгоритма написаны с нуля (`src/hash/`), готовые функции `hashlib`
+используются только в тестах как эталон.
+
+| Алгоритм | Файл | Стандарт | Конструкция | Стойкость к коллизиям / прообразу |
+|----------|------|----------|-------------|:---:|
+| SHA-256 | `src/hash/sha256.py` | NIST FIPS 180-4 | Меркла-Дамгарда, блоки 512 бит, 64 раунда | 2^128 / 2^256 |
+| SHA3-256 | `src/hash/sha3_256.py` | NIST FIPS 202 | "губка" Keccak-f[1600], rate 1088 бит | 2^128 / 2^256 |
+
+Свойства безопасности:
+- Хэш — односторонняя функция: по значению нельзя восстановить файл, а
+  малейшее изменение входа меняет около половины бит результата
+  (лавинный эффект, проверяется тестом).
+- SHA-256 подвержен атаке удлинения сообщения (length extension): по
+  `H(m)` и длине `m` можно вычислить `H(m || padding || x)`, не зная `m`.
+  Поэтому нельзя использовать `H(секрет || сообщение)` как MAC — для этого
+  нужен HMAC. SHA3-256 такой атаке не подвержен благодаря скрытой части
+  состояния (capacity).
+- Хэш подтверждает целостность только если сам хэш получен по доверенному
+  каналу: тот, кто может подменить файл, может подменить и хэш рядом с ним.
+- Реализация на чистом Python медленная (порядка 0.3 МБ/с против сотен
+  МБ/с у `hashlib`/`sha256sum`) — файл в 1 ГБ хэшируется около часа.
+
 ## Проверка корректности
 
 ### Автоматические тесты
@@ -122,6 +180,8 @@ Mersenne Twister, предсказуемый при известном сост�
 python -m tests.test_roundtrip   # базовый round-trip (ECB, из спринта 1)
 python -m tests.test_modes       # round-trip для всех режимов + IV + IO-3
 python -m tests.test_csprng      # уникальность ключей, распределение бит
+python -m tests.test_hash        # векторы NIST, пустой файл, dgst, границы блоков
+python -m tests.test_hash_avalanche   # лавинный эффект SHA-256 и SHA3-256
 ```
 
 ### Ручная проверка генерации ключа (TEST-1)
@@ -147,6 +207,37 @@ diff plain.txt decrypted_by_openssl.txt
 ```
 
 (Для других режимов — меняем `cbc` на `cfb`/`ofb`/`ctr` в обеих командах.)
+
+### Проверка хэшей (спринт 4)
+
+Сравнение с системными утилитами (вывод должен совпасть байт в байт):
+
+```bash
+cryptocore dgst --algorithm sha256 --input large_file.iso > my_hash.txt
+sha256sum large_file.iso > system_hash.txt
+diff my_hash.txt system_hash.txt        # различий быть не должно
+
+cryptocore dgst --algorithm sha3-256 --input large_file.iso > my_hash3.txt
+sha3sum -a 256 large_file.iso > system_hash3.txt     # либо: openssl dgst -sha3-256
+diff my_hash3.txt system_hash3.txt
+```
+
+В Windows PowerShell эталон для SHA-256: `Get-FileHash file -Algorithm SHA256`
+(для SHA3-256 в PowerShell встроенного эталона нет — используйте
+`python -c "import hashlib,sys; print(hashlib.sha3_256(open(sys.argv[1],'rb').read()).hexdigest())" file`).
+
+Векторы NIST (SHA-256):
+
+```bash
+echo -n "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" | cryptocore dgst --algorithm sha256 --input -
+# 248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1  -
+```
+
+Пустой файл: SHA-256 = `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`,
+SHA3-256 = `a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a`.
+
+Скрипт `test_sprint4.ps1` (Windows PowerShell) прогоняет все эти проверки;
+ключ `-Large` добавляет тест на файле больше 1 ГБ (долго, см. выше про скорость).
 
 ### NIST Statistical Test Suite (TEST-3)
 
@@ -196,7 +287,12 @@ cryptocore/
 │   ├── cli_parser.py   # разбор и валидация аргументов CLI (ключ, --iv)
 │   ├── csprng.py       # криптостойкий генератор случайных чисел
 │   ├── file_io.py      # чтение/запись файлов
-│   ├── main.py         # точка входа: диспетчеризация режимов, ключ/IV
+│   ├── hash_cli.py     # подкоманда dgst: аргументы и вывод
+│   ├── main.py         # точка входа: dgst либо шифрование (режимы, ключ/IV)
+│   ├── hash/
+│   │   ├── sha256.py       # SHA-256 с нуля (FIPS 180-4)
+│   │   ├── sha3_256.py     # SHA3-256 с нуля (FIPS 202, Keccak)
+│   │   └── file_hash.py    # хэширование файла порциями
 │   └── modes/
 │       ├── common.py   # общие утилиты: XOR, PKCS#7, доступ к AES-примитиву
 │       ├── ecb.py
@@ -207,7 +303,9 @@ cryptocore/
 ├── tests/
 │   ├── test_roundtrip.py   # round-trip тест из спринта 1 (ECB)
 │   ├── test_modes.py       # round-trip для всех режимов + IV + IO-3
-│   └── test_csprng.py      # уникальность ключей, распределение бит, подготовка NIST-данных
+│   ├── test_csprng.py      # уникальность ключей, распределение бит, подготовка NIST-данных
+│   ├── test_hash.py        # векторы NIST, пустой файл, dgst, границы блоков
+│   └── test_hash_avalanche.py  # лавинный эффект
 ├── setup.py
 ├── requirements.txt
 └── README.md
