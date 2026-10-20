@@ -6,3 +6,6 @@ build/
 dist/
 *.enc
 *.dec
+nist_test_data*.bin
+nist_report.md
+nist_pvalues.csv

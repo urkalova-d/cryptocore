@@ -308,43 +308,27 @@ SHA3-256 = `a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a`.
 
 ### NIST Statistical Test Suite (TEST-3)
 
-Статистический аудит самого источника случайности выполняется внешним
-инструментом — [NIST Statistical Test Suite (STS)](https://csrc.nist.gov/projects/random-bit-generation/documentation-and-software).
+Статистический аудит источника случайности (`generate_random_bytes`) выполнен
+набором из 15 тестов NIST SP 800-22. Официальный пакет STS (`assess`) в среде
+разработки недоступен, поэтому тесты реализованы на Python: `tests/nist_sts.py`
+(независимая реализация по документу SP 800-22, проверена на примерах из него в
+`tests/test_nist_sts.py`). Процедура, список тестов, проверка реализации и
+**фактические результаты прогонов** — в [TESTING.md](TESTING.md).
 
-1. Сгенерировать достаточно большой файл случайных данных (рекомендуется 1-100 МБ):
+```bash
+pip install -r requirements-dev.txt     # numpy
+python -c "from src.csprng import generate_random_bytes; open('nist_test_data.bin','wb').write(generate_random_bytes(10*1024*1024))"
+python -m tests.nist_sts --input nist_test_data.bin --output nist_report.md
+python -m unittest tests.test_nist_sts
+```
 
-   ```bash
-   python -c "from src.csprng import generate_random_bytes; \
-       open('nist_test_data.bin', 'wb').write(generate_random_bytes(10_000_000))"
-   ```
+Итог: на 320 потоках по 2^20 бит (два независимых прогона, 10 и 30 МБ) пройдены
+все 15 тестов; плохие контрольные генераторы (нули, чередование, смещение, LCG)
+тестами отвергаются. Результаты: `docs/nist_results/`.
 
-   Либо через вспомогательную функцию в тестах (пишет чанками, без
-   удержания всего файла в памяти разом):
-
-   ```bash
-   python -c "from tests.test_csprng import prepare_nist_test_data; prepare_nist_test_data()"
-   ```
-
-2. Скачать и собрать NIST STS (C-версия) с сайта NIST, либо использовать
-   готовую сборку.
-
-3. Запустить набор тестов на сгенерированном файле:
-
-   ```bash
-   ./assess 10000000
-   # далее отвечать на интерактивные вопросы assess, указав путь
-   # к nist_test_data.bin и 0 (бинарный формат)
-   ```
-
-4. **Критерий успеха:** подавляющее большинство из 15 тестов должны
-   показать p-value ≥ 0.01. Единичные "пограничные" неудачи статистически
-   ожидаемы даже для качественного CSPRNG (это следствие самой природы
-   статистических тестов — у них есть предопределённый уровень ложных
-   срабатываний); массовые провалы по многим тестам означали бы
-   реальный дефект генератора.
-
-5. Результаты прогона рекомендуется сохранить рядом (например, в
-   `TESTING.md`) вместе с датой и версией NIST STS, которой пользовались.
+Дополнительно результат можно перепроверить официальным `assess` на Linux/WSL:
+собрать STS с сайта NIST и запустить `./assess 1048576` на том же файле
+(бинарный формат, ввод `nist_test_data.bin`, 80 потоков).
 
 ## Структура проекта
 
@@ -373,8 +357,13 @@ cryptocore/
 │   ├── test_csprng.py      # уникальность ключей, распределение бит, подготовка NIST-данных
 │   ├── test_hash.py        # векторы NIST, пустой файл, dgst, границы блоков
 │   ├── test_hash_avalanche.py  # лавинный эффект
-│   └── benchmark_hash.py   # замер скорости и тест на файле >1 ГБ (TEST-4, TEST-6)
+│   ├── benchmark_hash.py   # замер скорости и тест на файле >1 ГБ (TEST-4, TEST-6)
+│   ├── nist_sts.py         # 15 тестов NIST SP 800-22 на Python (TEST-3)
+│   └── test_nist_sts.py    # проверка nist_sts.py по примерам из документа NIST
+├── docs/nist_results/      # отчёты и p-значения прогонов NIST
 ├── setup.py
 ├── requirements.txt
+├── requirements-dev.txt    # numpy для тестов NIST
+├── TESTING.md              # процедура и результаты статистического тестирования
 └── README.md
 ```
